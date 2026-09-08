@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Texas Datacenter Siting Advisor — Demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="title">Siting Advisor</div>
+        <div class="subtitle">Texas datacenter placement — capacity, cost, and a path to yes</div>
+      </div>
+      <div class="topbar-right">
+        <button class="btn btn-ghost" id="loadBadBtn">Demo: bad placement</button>
+        <button class="btn btn-ghost" id="loadGoodBtn">Demo: good placement</button>
+        <button class="btn btn-ghost" id="resetBtn">Reset</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <div class="map-col">
+        <div class="map-card">
+          <div class="grid-wrap">
+            <div class="tile-grid" id="tileGrid"></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="dot dot-good"></span>Buildable now</span>
+            <span class="legend-item"><span class="dot dot-caution"></span>Minor upgrade</span>
+            <span class="legend-item"><span class="dot dot-major"></span>Major upgrade</span>
+            <span class="legend-item"><span class="dot dot-bad"></span>Blocked / try nearby</span>
+            <span class="legend-item"><span class="dot dot-paused"></span>Local pause in effect</span>
+            <span class="legend-item"><span class="ring"></span>Substation-adjacent</span>
+          </div>
+          <p class="map-note">Schematic county grid, not geographically precise — a stand-in for the real HIFLD / TIGER / Queued Up layers. See README for how to wire those in.</p>
+        </div>
+      </div>
+
+      <div class="side-col">
+        <div class="panel">
+          <div class="panel-title">Proposed facility</div>
+          <div class="field">
+            <label for="loadMW">Load size (MW)</label>
+            <input type="range" id="loadMW" min="10" max="300" value="150">
+            <div class="field-readout"><span id="loadMWVal">150</span> MW</div>
+          </div>
+          <div class="field">
+            <label>Interconnection</label>
+            <div class="toggle-row" id="interconnectToggle">
+              <button class="toggle-opt selected" data-value="grid-tied">Grid-tied</button>
+              <button class="toggle-opt" data-value="self-generated">Self-generated</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Cooling</label>
+            <div class="toggle-row" id="coolingToggle">
+              <button class="toggle-opt selected" data-value="air">Air</button>
+              <button class="toggle-opt" data-value="evaporative">Evaporative</button>
+              <button class="toggle-opt" data-value="liquid">Liquid closed-loop</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="tilePanel">
+          <div class="panel-title">Selected site</div>
+          <div id="tileEmpty" class="tile-empty">Click a tile on the map to evaluate it.</div>
+          <div id="tileDetail" class="tile-detail" style="display:none;">
+            <div class="tile-name" id="tileName"></div>
+            <div class="tile-score-row">
+              <span class="tile-score" id="tileScore"></span>
+              <span class="tile-tier" id="tileTier"></span>
+            </div>
+            <ul class="tile-notes" id="tileNotes"></ul>
+            <button class="btn btn-primary" id="placeBtn">Place datacenter here</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Statewide resources</div>
+          <div class="meter-row">
+            <div class="meter-head"><span>ERCOT headroom</span><span id="headroomVal">78</span></div>
+            <div class="meter-track"><div class="meter-fill fill-headroom" id="headroomFill" style="width:78%"></div></div>
+          </div>
+          <div class="meter-row">
+            <div class="meter-head"><span>Water reserve</span><span id="waterVal">64</span></div>
+            <div class="meter-track"><div class="meter-fill fill-water" id="waterFill" style="width:64%"></div></div>
+          </div>
+          <div class="meter-row">
+            <div class="meter-head"><span>Community approval</span><span id="approvalVal">72</span></div>
+            <div class="meter-track"><div class="meter-fill fill-approval" id="approvalFill" style="width:72%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
