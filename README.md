@@ -21,6 +21,23 @@ instructor in the room, so the tool explains itself:
   the map, in the browser, so a learner can look at the underlying dataset
   itself and not just the simulation's output.
 
+## External sites & services
+
+| Site | Used for | When |
+|---|---|---|
+| [tile.openstreetmap.org](https://tile.openstreetmap.org) | Basemap tiles under the map | **Live**, every page load — the only external network call the deployed app makes |
+| [eia.gov](https://www.eia.gov/electricity/data/eia860/) | EIA-860 power plant dataset (source of `data/power_plants_tx.geojson`) | Build time only, via `scripts/build_power_layer.py` |
+| [www2.census.gov](https://www2.census.gov/geo/tiger/GENZ2023/shp/) | Cartographic boundary shapefile (source of `data/counties_tx.geojson`) | Build time only, via `scripts/build_county_layer.py` |
+| [registry.npmjs.org](https://registry.npmjs.org/leaflet) | Where the vendored `vendor/leaflet/` build was pulled from (`npm pack leaflet@1.9.4`) | Build time only, one-time — not fetched at runtime |
+| [leafletjs.com](https://leafletjs.com) | The mapping library itself (vendored into `vendor/leaflet/`, not CDN-loaded) | Attribution only; not fetched live |
+| [ecfr.gov](https://www.ecfr.gov/current/title-18/chapter-I/subchapter-B/part-388/subject-group-ECFR5c6de20b0a24d10/section-388.113) | Linked from the "How this works" overlay as the citation for CEII (18 CFR 388.113) | Outbound link only, opened by the user, not fetched by the app |
+
+Everything else the page shows — county boundaries, power plants, regulatory
+facts, coefficients — is pre-processed into the static files in `data/` and
+served from the same origin as the page. The deployed app makes exactly one
+kind of live third-party request (OSM map tiles); nothing else, no API key,
+no analytics, no tracking.
+
 ## Run it
 
 No build step, no API key required. The app fetches its data files at
