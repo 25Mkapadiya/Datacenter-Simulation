@@ -420,16 +420,23 @@ function initMap() {
     scrollWheelZoom: true,
     maxBounds: US_BOUNDS,
     maxBoundsViscosity: 1.0,
-    minZoom: 5
+    worldCopyJump: false,
+    minZoom: 5,
+    maxZoom: 12
   }).setView([31.4, -99.3], 6);
+
   // Plain OpenStreetMap raster tiles — no API key, ever, unlike CARTO's
   // dark/light basemaps which now require an account + key for anything
   // beyond very light use. Dark look comes from a CSS filter on the tile
   // pane instead (see #map .leaflet-tile-pane in style.css), so only the
   // basemap gets inverted, not the county/plant overlays drawn on top.
+  // noWrap + bounds keep the tile layer itself clipped to the US, so it
+  // can't render repeated copies of the world at low zoom.
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors",
-    maxZoom: 19
+    maxZoom: 19,
+    noWrap: true,
+    bounds: US_BOUNDS
   }).addTo(map);
 
   countyLayer = L.geoJSON(countiesData, {
