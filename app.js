@@ -412,9 +412,14 @@ function styleCounty(feature) {
 
 function initMap() {
   map = L.map("map", { scrollWheelZoom: true }).setView([31.4, -99.3], 6);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-    maxZoom: 12
+  // Plain OpenStreetMap raster tiles — no API key, ever, unlike CARTO's
+  // dark/light basemaps which now require an account + key for anything
+  // beyond very light use. Dark look comes from a CSS filter on the tile
+  // pane instead (see #map .leaflet-tile-pane in style.css), so only the
+  // basemap gets inverted, not the county/plant overlays drawn on top.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19
   }).addTo(map);
 
   countyLayer = L.geoJSON(countiesData, {

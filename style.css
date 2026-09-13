@@ -90,6 +90,13 @@ body{
   border:1px solid var(--line);
   background:var(--surface-2);
 }
+/* Dark-mode look for plain (unauthenticated, key-free) OpenStreetMap
+   tiles: invert + rotate hue back so land/water don't swap colors, then
+   flatten contrast a bit. Scoped to the tile pane only, so it doesn't
+   touch the county/plant layers drawn in the panes above it. */
+#map .leaflet-tile-pane{
+  filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.85) saturate(0.7);
+}
 @media (max-width:880px){
   #map{height:420px;}
 }
