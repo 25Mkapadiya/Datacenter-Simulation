@@ -5,6 +5,22 @@ Texas, see a capacity estimate, a tier ("buildable now" through "try a
 nearby site"), and — when a site is blocked — what's blocking it and where
 to look instead.
 
+This build targets **standalone, self-directed learning** — there's no
+instructor in the room, so the tool explains itself:
+
+- **"How this works" overlay** (shown on first visit, reopenable from the
+  topbar) walks through the five-gate model before a first-time user clicks
+  anything.
+- **Inline glossary chips** — click any jargon term in a gate's notes
+  (`EIA-860`, `WUE`, `CEII`, `SB6`, `grid voltage`, ...) to expand a
+  plain-language definition right there, no separate glossary page to lose
+  your place in. Defined in `GLOSSARY` in `app.js`.
+- **"Explore the data" panel** below the map computes real statistics —
+  generation mix by technology, plant-size distribution, the single
+  largest plant — directly from the same 1,532-plant EIA-860 file driving
+  the map, in the browser, so a learner can look at the underlying dataset
+  itself and not just the simulation's output.
+
 ## Run it
 
 No build step, no API key required. The app fetches its data files at

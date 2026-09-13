@@ -30,7 +30,7 @@
 var NAMED_REGULATORY = {
   "Tarrant": { status: "paused", reason: "Fort Worth has paused new datacenter applications." },
   "Hood": { status: "blocked", reason: "Hood County rejected two prior siting attempts." },
-  "Hill": { status: "blocked", reason: "Hill County passed a moratorium on new datacenter development." },
+  "Hill": { status: "blocked", reason: "Hill County passed a moratorium on new datacenter development.", terms: ["moratorium"] },
   "Travis": { status: "blocked", reason: "Residential buffer zone — too close to dense residential development." },
   "Hays": { status: "blocked", reason: "Edwards Aquifer recharge zone — protected from new impervious development." },
   "Bexar": { status: "paused", reason: "San Antonio has paused new datacenter applications." },
@@ -42,6 +42,50 @@ var NAMED_REGULATORY = {
 
 var GOOD_EXAMPLE_COUNTY = "Ector";
 var BAD_EXAMPLE_COUNTY = "Hood";
+
+// ---- glossary: plain-language definitions for jargon used in gate notes ----
+// Rendered as inline <details> chips next to the sentence that uses the term
+// (see note() and appendNoteLi()) so a self-directed learner never has to
+// leave the page to look something up.
+var GLOSSARY = {
+  "EIA-860": "The U.S. Energy Information Administration's annual survey of every power plant 1MW or larger in the country — location, capacity, fuel type, ownership. This app uses the 2025 edition.",
+  "nameplate capacity": "The maximum power a generator is rated to produce under ideal conditions, in megawatts (MW). It's a ceiling, not what the plant produces on average — a solar plant's nameplate MW, for instance, only happens at solar noon on a clear day.",
+  "grid voltage": "The voltage a plant is wired into, in kilovolts (kV). Higher voltage (230kV+) means long-distance, high-capacity transmission lines, not just local delivery wires — it's a rough signal of how much power a connection point can move.",
+  "substation headroom": "How much additional load a substation can actually accept before it needs upgrades. This is the single most important number for a real siting decision — and it's legally non-public (see CEII).",
+  "CEII": "Critical Energy Infrastructure Information — a federal designation (18 CFR 388.113) that keeps detailed grid-capacity data out of the public domain, for security reasons. It's why this tool has to estimate power access instead of looking it up.",
+  "interconnection": "The physical and contractual process of connecting a new electricity user (or generator) to the grid. \"Grid-tied\" draws power from the shared grid; \"self-generated\" means the facility brings its own power plant.",
+  "curtailment": "When a grid operator orders a large customer to temporarily reduce its power draw — usually during high demand — to keep the grid stable.",
+  "SB6": "Texas Senate Bill 6 (2025) — requires large electricity users (≥75MW) to register with ERCOT and follow statewide interconnection and curtailment rules.",
+  "ERCOT": "The Electric Reliability Council of Texas — runs the power grid for about 90% of the state. It's electrically isolated from the rest of the US grid, which limits Texas's ability to import power during a shortage.",
+  "WUE": "Water Usage Effectiveness — liters of water used per kilowatt-hour of IT power delivered. Lower is more water-efficient; it depends heavily on the cooling method.",
+  "evaporative cooling": "A cooling method that uses water evaporation to remove heat. It's cheap and energy-efficient but consumes far more water than air or liquid closed-loop cooling.",
+  "moratorium": "A temporary, formal halt on new development or permitting in a given area, usually passed by a local government."
+};
+
+function note(text, terms) {
+  return { text: text, terms: terms || [] };
+}
+
+function appendNoteLi(container, item) {
+  var li = document.createElement("li");
+  var n = (typeof item === "string") ? note(item) : item;
+  li.appendChild(document.createTextNode(n.text));
+  n.terms.forEach(function (term) {
+    var def = GLOSSARY[term];
+    if (!def) return;
+    var details = document.createElement("details");
+    details.className = "term-chip";
+    var summary = document.createElement("summary");
+    summary.textContent = "ⓘ " + term;
+    details.appendChild(summary);
+    var defEl = document.createElement("p");
+    defEl.className = "term-def";
+    defEl.textContent = def;
+    details.appendChild(defEl);
+    li.appendChild(details);
+  });
+  container.appendChild(li);
+}
 
 // ---- cooling trade-offs (relative units; see gateWater for the real WUE math) ----
 var COOLING = {
@@ -165,7 +209,7 @@ function gatePower(lat, lng) {
     return {
       pass: false,
       blocked: true,
-      reason: "No EIA-860 generation facility within 100 miles — proxy suggests very weak transmission access here.",
+      reason: note("No EIA-860 generation facility within 100 miles — proxy suggests very weak transmission access here.", ["EIA-860"]),
       notes: []
     };
   }
@@ -183,30 +227,32 @@ function gatePower(lat, lng) {
   var score = Math.max(5, Math.min(95, Math.round(base + capacityBoost)));
 
   var notes = [];
-  notes.push(
+  notes.push(note(
     "Estimate: nearest EIA-860 plant is " + nearest.feature.properties.name + " (" +
     nearest.feature.properties.nameplate_mw + " MW), " + nearest.distanceMiles.toFixed(1) +
-    " mi away. This is a proxy for grid density, not real substation headroom (CEII-restricted, not public)."
-  );
+    " mi away. This is a proxy for grid density, not real substation headroom (CEII-restricted, not public).",
+    ["EIA-860", "nameplate capacity", "substation headroom", "CEII"]
+  ));
   if (nearestHighVoltage) {
-    notes.push(
+    notes.push(note(
       nearestHighVoltage.feature.properties.max_grid_voltage_kv + "kV+ interconnection nearby: " +
-      nearestHighVoltage.feature.properties.name + ", " + nearestHighVoltage.distanceMiles.toFixed(1) + " mi."
-    );
+      nearestHighVoltage.feature.properties.name + ", " + nearestHighVoltage.distanceMiles.toFixed(1) + " mi.",
+      ["grid voltage"]
+    ));
   } else {
-    notes.push("No 230kV+ interconnected plant found within 100 miles — likely a distribution-only area.");
+    notes.push(note("No 230kV+ interconnected plant found within 100 miles — likely a distribution-only area.", ["grid voltage"]));
   }
-  notes.push(Math.round(totalNearbyMW).toLocaleString() + " MW of nameplate generation capacity within 25 miles (proxy for local grid strength).");
+  notes.push(note(Math.round(totalNearbyMW).toLocaleString() + " MW of nameplate generation capacity within 25 miles (proxy for local grid strength).", ["nameplate capacity"]));
 
   if (state.loadMW >= 75) {
-    notes.push("SB6 (2025): loads ≥75MW are subject to statewide interconnection/curtailment rules.");
+    notes.push(note("SB6 (2025): loads ≥75MW are subject to statewide interconnection/curtailment rules.", ["SB6", "ERCOT"]));
   }
   if (state.interconnect === "grid-tied" && score >= 75) {
     score -= 15;
-    notes.push("Gov. Abbott's Aug 2026 order pauses new grid-tied interconnections pending audit — this cap lifts once the audit clears, or switch to self-generated.");
+    notes.push(note("Gov. Abbott's Aug 2026 order pauses new grid-tied interconnections pending audit — this cap lifts once the audit clears, or switch to self-generated.", ["interconnection"]));
   }
   if (state.interconnect === "self-generated") {
-    notes.push("Self-generated facilities are exempt from the Aug 2026 grid-tied interconnection pause.");
+    notes.push(note("Self-generated facilities are exempt from the Aug 2026 grid-tied interconnection pause.", ["interconnection"]));
   }
 
   return { pass: true, blocked: false, score: score, notes: notes };
@@ -217,14 +263,14 @@ function gateFiber() {
   return {
     pass: true,
     blocked: false,
-    notes: ["Fiber/long-haul route data (FCC BDC, PeeringDB) is not wired in yet — this gate is a structural placeholder and doesn't affect the score."]
+    notes: [note("Fiber/long-haul route data (FCC BDC, PeeringDB) is not wired in yet — this gate is a structural placeholder and doesn't affect the score.")]
   };
 }
 
 // ---- gate 3: Regulation (real, hand-curated from the research brief) ----
 function gateRegulatory(county) {
   if (!county) {
-    return { pass: true, blocked: false, notes: ["Outside a recognized Texas county boundary."] };
+    return { pass: true, blocked: false, notes: [note("Outside a recognized Texas county boundary.")] };
   }
   var name = county.properties.name;
   var reg = NAMED_REGULATORY[name];
@@ -232,13 +278,13 @@ function gateRegulatory(county) {
     return { pass: true, blocked: false, notes: [], countyName: name };
   }
   if (reg.status === "blocked") {
-    return { pass: false, blocked: true, reason: reg.reason, notes: [], countyName: name };
+    return { pass: false, blocked: true, reason: note(reg.reason, reg.terms), notes: [], countyName: name };
   }
   if (reg.status === "paused") {
-    return { pass: true, blocked: false, capScore: 55, notes: [reg.reason + " Score capped pending local reopening."], countyName: name };
+    return { pass: true, blocked: false, capScore: 55, notes: [note(reg.reason + " Score capped pending local reopening.", reg.terms)], countyName: name };
   }
   // "notable" — informational context from the brief, not a constraint
-  return { pass: true, blocked: false, notes: [reg.reason], countyName: name };
+  return { pass: true, blocked: false, notes: [note(reg.reason, reg.terms)], countyName: name };
 }
 
 // ---- gate 4: Water (real published coefficients, no local supply-boundary data yet) ----
@@ -246,12 +292,15 @@ function gateWater() {
   var cooling = COOLING[state.cooling];
   var galPerDay = Math.round(state.loadMW * COEFFICIENTS.GAL_PER_DAY_PER_MW_AVG * cooling.waterMultiplier);
   var notes = [
-    "Estimated withdrawal at " + state.loadMW + "MW with " + state.cooling + " cooling: ~" +
-    galPerDay.toLocaleString() + " gal/day (US-average WUE coefficient, 1.8 L/kWh, Shehabi/LBNL 2016).",
-    "Local water-system capacity (EPA CWS service area boundaries) isn't wired in yet — this is a demand estimate only, not checked against real supply."
+    note(
+      "Estimated withdrawal at " + state.loadMW + "MW with " + state.cooling + " cooling: ~" +
+      galPerDay.toLocaleString() + " gal/day (US-average WUE coefficient, 1.8 L/kWh, Shehabi/LBNL 2016).",
+      ["WUE"]
+    ),
+    note("Local water-system capacity (EPA CWS service area boundaries) isn't wired in yet — this is a demand estimate only, not checked against real supply.")
   ];
   if (state.cooling === "evaporative") {
-    notes.push("Evaporative cooling: ~" + Math.round(COEFFICIENTS.EVAP_CONSUMED_FRACTION * 100) + "% of withdrawal is consumed rather than returned to the source.");
+    notes.push(note("Evaporative cooling: ~" + Math.round(COEFFICIENTS.EVAP_CONSUMED_FRACTION * 100) + "% of withdrawal is consumed rather than returned to the source.", ["evaporative cooling"]));
   }
   return { pass: true, blocked: false, notes: notes, galPerDay: galPerDay };
 }
@@ -263,9 +312,11 @@ function gateLand() {
     pass: true,
     blocked: false,
     notes: [
-      "Reference baseline: a " + COEFFICIENTS.AVG_CAMPUS_ACRES + "-acre campus at $" +
-      COEFFICIENTS.LAND_COST_PER_ACRE.toLocaleString() + "/acre (2024 avg) ≈ $" +
-      (estCost / 1e6).toFixed(0) + "M land cost — not adjusted for this specific site; parcel/zoning data isn't wired in yet."
+      note(
+        "Reference baseline: a " + COEFFICIENTS.AVG_CAMPUS_ACRES + "-acre campus at $" +
+        COEFFICIENTS.LAND_COST_PER_ACRE.toLocaleString() + "/acre (2024 avg) ≈ $" +
+        (estCost / 1e6).toFixed(0) + "M land cost — not adjusted for this specific site; parcel/zoning data isn't wired in yet."
+      )
     ]
   };
 }
@@ -421,15 +472,11 @@ function renderTilePanel() {
     scoreEl.style.color = "var(--bad)";
     tierEl.textContent = "Blocked at " + ev.blockingGate + " gate";
     tierEl.style.color = "var(--bad)";
-    var li = document.createElement("li");
-    li.textContent = ev.reason;
-    notesEl.appendChild(li);
+    appendNoteLi(notesEl, ev.reason);
 
     var nearEv = suggestNearby(state.selected.lat, state.selected.lng);
     if (nearEv) {
-      var li2 = document.createElement("li");
-      li2.textContent = "Nearest viable alternative: " + nearEv.name + " (" + nearEv.tier.label + ").";
-      notesEl.appendChild(li2);
+      appendNoteLi(notesEl, "Nearest viable alternative: " + nearEv.name + " (" + nearEv.tier.label + ").");
     }
     placeBtn.disabled = true;
     placeBtn.textContent = "Can't place — blocked";
@@ -440,9 +487,7 @@ function renderTilePanel() {
     tierEl.style.color = "var(--" + ev.tier.cls + ")";
     ev.gates.forEach(function (g) {
       g.result.notes.forEach(function (n) {
-        var l = document.createElement("li");
-        l.textContent = n;
-        notesEl.appendChild(l);
+        appendNoteLi(notesEl, n);
       });
     });
     var alreadyPlaced = state.placed.some(function (p) { return p.lat === state.selected.lat && p.lng === state.selected.lng; });
@@ -545,6 +590,87 @@ function wireControls() {
   });
 }
 
+// ---- data explorer (educational): real stats computed from the loaded ----
+// EIA-860 dataset, so a self-directed learner can look at the raw data
+// feeding the simulation, not just the tool's output.
+function buildDataExplorer() {
+  var feats = plantsData.features;
+  var totalMW = 0;
+  var techMW = {};
+  var buckets = [
+    { label: "under 10 MW", test: function (mw) { return mw < 10; }, count: 0 },
+    { label: "10–50 MW", test: function (mw) { return mw >= 10 && mw < 50; }, count: 0 },
+    { label: "50–200 MW", test: function (mw) { return mw >= 50 && mw < 200; }, count: 0 },
+    { label: "200–1,000 MW", test: function (mw) { return mw >= 200 && mw < 1000; }, count: 0 },
+    { label: "1,000 MW or more", test: function (mw) { return mw >= 1000; }, count: 0 }
+  ];
+  var largest = null;
+
+  feats.forEach(function (f) {
+    var mw = f.properties.nameplate_mw || 0;
+    totalMW += mw;
+    var techs = f.properties.technologies && f.properties.technologies.length ? f.properties.technologies : ["Unknown"];
+    techs.forEach(function (t) { techMW[t] = (techMW[t] || 0) + mw / techs.length; });
+    buckets.forEach(function (b) { if (b.test(mw)) b.count++; });
+    if (!largest || mw > (largest.properties.nameplate_mw || 0)) largest = f;
+  });
+
+  var topTech = Object.keys(techMW)
+    .map(function (k) { return { name: k, mw: techMW[k] }; })
+    .sort(function (a, b) { return b.mw - a.mw; })
+    .slice(0, 8);
+  var maxTechMW = topTech.length ? topTech[0].mw : 1;
+  var maxBucketCount = Math.max.apply(null, buckets.map(function (b) { return b.count; }));
+
+  document.getElementById("explorerSummary").textContent =
+    feats.length.toLocaleString() + " Texas power plants in EIA-860 (2025), totaling " +
+    Math.round(totalMW).toLocaleString() + " MW of nameplate capacity. Largest: " +
+    largest.properties.name + " (" + largest.properties.nameplate_mw.toLocaleString() + " MW, " + largest.properties.county + " County).";
+
+  var techEl = document.getElementById("explorerTech");
+  techEl.innerHTML = "";
+  topTech.forEach(function (t) {
+    var row = document.createElement("div");
+    row.className = "bar-row";
+    var pct = Math.max(2, Math.round((t.mw / maxTechMW) * 100));
+    row.innerHTML =
+      '<div class="bar-label" title="' + t.name.replace(/"/g, "&quot;") + '">' + t.name + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="bar-value">' + Math.round(t.mw).toLocaleString() + ' MW</div>';
+    techEl.appendChild(row);
+  });
+
+  var bucketEl = document.getElementById("explorerBuckets");
+  bucketEl.innerHTML = "";
+  buckets.forEach(function (b) {
+    var row = document.createElement("div");
+    row.className = "bar-row";
+    var pct = Math.max(2, Math.round((b.count / maxBucketCount) * 100));
+    row.innerHTML =
+      '<div class="bar-label">' + b.label + '</div>' +
+      '<div class="bar-track"><div class="bar-fill bar-fill-alt" style="width:' + pct + '%"></div></div>' +
+      '<div class="bar-value">' + b.count.toLocaleString() + ' plants</div>';
+    bucketEl.appendChild(row);
+  });
+}
+
+// ---- intro walkthrough (educational): shown once for first-time,
+// self-directed visitors; dismissal remembered in localStorage. ----
+function wireIntro() {
+  var overlay = document.getElementById("introOverlay");
+  if (!overlay) return;
+  var seen = false;
+  try { seen = localStorage.getItem("dcAdvisorSeenIntro") === "1"; } catch (e) { /* private browsing etc. */ }
+  if (!seen) overlay.hidden = false;
+
+  function dismiss() {
+    overlay.hidden = true;
+    try { localStorage.setItem("dcAdvisorSeenIntro", "1"); } catch (e) { /* ignore */ }
+  }
+  document.getElementById("introDismiss").addEventListener("click", dismiss);
+  document.getElementById("helpBtn").addEventListener("click", function () { overlay.hidden = false; });
+}
+
 // ---- init ----
 function setStatus(msg) {
   var el = document.getElementById("mapStatus");
@@ -562,6 +688,8 @@ Promise.all([
   });
   initMap();
   wireControls();
+  wireIntro();
+  buildDataExplorer();
   renderMeters();
   renderTilePanel();
   setStatus(countiesData.features.length + " counties, " + plantsData.features.length + " power plants loaded (real data — see README).");

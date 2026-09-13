@@ -15,6 +15,7 @@
         <div class="subtitle">Texas datacenter placement — capacity, cost, and a path to yes</div>
       </div>
       <div class="topbar-right">
+        <button class="btn btn-ghost" id="helpBtn">How this works</button>
         <button class="btn btn-ghost" id="loadBadBtn">Demo: bad placement</button>
         <button class="btn btn-ghost" id="loadGoodBtn">Demo: good placement</button>
         <button class="btn btn-ghost" id="resetBtn">Reset</button>
@@ -83,6 +84,7 @@
 
         <div class="panel">
           <div class="panel-title">Statewide resources</div>
+          <p class="panel-subnote">Illustrative depletion meters, not real ERCOT/utility data — they track the cumulative effect of the datacenters <em>you've</em> placed in this session, to show why siting decisions compound.</p>
           <div class="meter-row">
             <div class="meter-head"><span>ERCOT headroom</span><span id="headroomVal">78</span></div>
             <div class="meter-track"><div class="meter-fill fill-headroom" id="headroomFill" style="width:78%"></div></div>
@@ -97,6 +99,40 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="panel explorer-panel">
+      <div class="panel-title">Explore the data</div>
+      <p class="panel-subnote">The map above is a simulation built on top of a real dataset. This is that dataset, directly — every number below is computed from the same 1,532-plant EIA-860 file the map uses, live in your browser.</p>
+      <p id="explorerSummary" class="explorer-summary">Loading&hellip;</p>
+      <div class="explorer-grid">
+        <div>
+          <div class="explorer-subhead">Generation mix by technology (nameplate MW)</div>
+          <div id="explorerTech" class="bar-list"></div>
+        </div>
+        <div>
+          <div class="explorer-subhead">Plant size distribution (count)</div>
+          <div id="explorerBuckets" class="bar-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="introOverlay" hidden>
+    <div class="overlay-card">
+      <div class="overlay-title">How this works</div>
+      <p>This tool estimates whether a proposed datacenter site in Texas is buildable, using real public infrastructure data. Click anywhere on the map to evaluate a site.</p>
+      <p>Every site is checked through five gates, <strong>in order</strong>:</p>
+      <ol class="overlay-gates">
+        <li><strong>Power</strong> — is there transmission/generation infrastructure nearby? (real data, but an estimate — see below)</li>
+        <li><strong>Fiber</strong> — network connectivity (not wired to real data yet)</li>
+        <li><strong>Regulation</strong> — local pauses, moratoria, and state law (real, hand-researched)</li>
+        <li><strong>Water</strong> — estimated demand from published coefficients</li>
+        <li><strong>Land</strong> — reference cost, not site-specific</li>
+      </ol>
+      <p>A site that fails an early gate is blocked, no matter how well it would score on a later one — a great location for water access doesn't help if there's no power nearby.</p>
+      <p>The single most important number for real siting — how much spare capacity a substation actually has — is legally non-public information (it's <a href="https://www.ecfr.gov/current/title-18/chapter-I/subchapter-B/part-388/subject-group-ECFR5c6de20b0a24d10/section-388.113" target="_blank" rel="noopener">CEII-restricted</a>). So the "Power" gate estimates it instead, from nearby generation capacity in public EIA data. Every score this tool gives you is directional, not authoritative — click the <strong>ⓘ</strong> chips throughout for plain-language definitions as you go, and see the "Explore the data" panel below the map to look at the underlying dataset yourself.</p>
+      <button class="btn btn-primary" id="introDismiss">Got it — let's explore</button>
     </div>
   </div>
 
