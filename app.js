@@ -40,9 +40,6 @@ var NAMED_REGULATORY = {
   "Nueces": { status: "notable", reason: "South Texas energy corridor, strong wind generation nearby." }
 };
 
-var GOOD_EXAMPLE_COUNTY = "Ector";
-var BAD_EXAMPLE_COUNTY = "Hood";
-
 // ---- glossary: plain-language definitions for jargon used in gate notes ----
 // Rendered as inline <details> chips next to the sentence that uses the term
 // (see note() and appendNoteLi()) so a self-directed learner never has to
@@ -354,6 +351,28 @@ function evaluateSite(lat, lng) {
   return { blocked: false, name: name, score: score, tier: tier, gates: gates };
 }
 
+function randomFrom(arr) {
+  return arr.length ? arr[Math.floor(Math.random() * arr.length)] : null;
+}
+
+// Pools for the demo buttons, re-evaluated on each click (evaluateSite
+// depends on the current load/interconnect/cooling controls) so the demo
+// stays consistent with whatever the user has dialed in, and so repeated
+// clicks land on a different real example instead of always the same one.
+function blockedCountySites() {
+  return countySites.filter(function (s) {
+    var reg = NAMED_REGULATORY[s.feature.properties.name];
+    return reg && reg.status === "blocked";
+  });
+}
+
+function goodCountySites() {
+  return countySites.filter(function (s) {
+    var ev = evaluateSite(s.centroid.lat, s.centroid.lng);
+    return !ev.blocked && ev.tier.cls === "good";
+  });
+}
+
 function suggestNearby(lat, lng) {
   var best = null, bestScore = -1, bestDist = Infinity;
   countySites.forEach(function (site) {
@@ -580,12 +599,12 @@ function wireControls() {
 
   document.getElementById("loadBadBtn").addEventListener("click", function () {
     resetSimulation();
-    var site = countySites.filter(function (s) { return s.feature.properties.name === BAD_EXAMPLE_COUNTY; })[0];
+    var site = randomFrom(blockedCountySites());
     if (site) { map.setView([site.centroid.lat, site.centroid.lng], 8); onMapClick(site.centroid.lat, site.centroid.lng); }
   });
   document.getElementById("loadGoodBtn").addEventListener("click", function () {
     resetSimulation();
-    var site = countySites.filter(function (s) { return s.feature.properties.name === GOOD_EXAMPLE_COUNTY; })[0];
+    var site = randomFrom(goodCountySites());
     if (site) { map.setView([site.centroid.lat, site.centroid.lng], 8); onMapClick(site.centroid.lat, site.centroid.lng); }
   });
 }
