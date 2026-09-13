@@ -1,58 +1,62 @@
 /*
- * Texas Datacenter Siting Advisor — demo logic.
+ * Texas Datacenter Siting Advisor — real-data build.
  *
- * Everything below runs client-side against the REGIONS data defined here.
- * REGIONS is a schematic 12x9 grid standing in for a real GeoJSON layer —
- * see README.md for how to replace it with actual HIFLD / TIGER / LBNL data.
+ * Data sources (see data/*.geojson "metadata" blocks and README for full
+ * provenance):
+ *   - County geometry:   US Census cartographic boundary files (2023)
+ *   - Power plants:      EIA-860 (2025 annual), Schedule 2 + Schedule 3.1
+ *   - Regulatory facts:  hand-curated from the project research brief
+ *                        (SB6 2025, Gov. Abbott's Aug 2026 interconnection
+ *                        pause, named local pauses/moratoria/rejections)
+ *
+ * Architecture note (per the project research doc): siting constraints are
+ * SEQUENTIAL, not a weighted composite. A site that fails an earlier gate
+ * can't be rescued by scoring well on a later one. Gates run in this order:
+ *
+ *     Power -> Fiber -> Regulation -> Water -> Land
+ *
+ * "Power" is the only gate backed by a real, siting-relevant proxy dataset
+ * right now (nearby EIA-860 generation + interconnected grid voltage,
+ * standing in for substation headroom, which is CEII-restricted under 18
+ * CFR 388.113 and not public — see README). "Fiber", "Water", and "Land"
+ * are wired as real gates in the pipeline but currently always pass with
+ * an informational note, because the underlying datasets (FCC BDC /
+ * PeeringDB, EPA CWS service boundaries, parcel/zoning) aren't fetched
+ * yet — see README "What's wired to real data" for the honest state of
+ * each layer and how to extend it.
  */
 
-// ---- grid shape: which (row, col) cells exist, per row [startCol, endCol] ----
-var ROW_MASK = [
-  [4, 6],   // row 0 — panhandle
-  [4, 7],   // row 1
-  [3, 8],   // row 2 — north Texas / DFW band
-  [2, 9],   // row 3
-  [1, 10],  // row 4 — central Texas
-  [0, 11],  // row 5 — widest band
-  [1, 10],  // row 6 — south / coastal
-  [2, 9],   // row 7
-  [4, 7]    // row 8 — Rio Grande Valley
-];
-var COLS = 12, ROWS = ROW_MASK.length;
-
-// ---- named tiles grounded in the real facts from the project brief ----
-// key: "row,col"
-var NAMED = {
-  "2,5": { name: "Tarrant County (Fort Worth)", status: "paused",
-    reason: "Fort Worth has paused new datacenter applications." },
-  "3,4": { name: "Hood County", status: "blocked",
-    reason: "Hood County rejected two prior siting attempts." },
-  "4,5": { name: "Hill County", status: "blocked",
-    reason: "Hill County passed a moratorium on new datacenter development." },
-  "5,5": { name: "Travis County (Austin)", status: "blocked",
-    reason: "Residential buffer zone — too close to dense residential development." },
-  "5,4": { name: "Hays County", status: "blocked",
-    reason: "Edwards Aquifer recharge zone — protected from new impervious development." },
-  "6,4": { name: "Bexar County (San Antonio)", status: "paused",
-    reason: "San Antonio has paused new datacenter applications." },
-  "4,2": { name: "Ector County (Permian Basin)", status: "substation",
-    reason: "Dense transmission buildout serving Permian Basin oil & gas load." },
-  "5,9": { name: "Harris County (Houston)", status: "substation",
-    reason: "Ship-channel industrial corridor — heavy existing interconnection capacity." },
-  "2,7": { name: "Collin County", status: "substation",
-    reason: "North Texas transmission-dense corridor." },
-  "7,7": { name: "Nueces County (Coastal Bend)", status: "substation",
-    reason: "South Texas energy corridor, strong wind generation nearby." }
+// ---- regulatory facts, keyed by real Texas county name (see README) ----
+var NAMED_REGULATORY = {
+  "Tarrant": { status: "paused", reason: "Fort Worth has paused new datacenter applications." },
+  "Hood": { status: "blocked", reason: "Hood County rejected two prior siting attempts." },
+  "Hill": { status: "blocked", reason: "Hill County passed a moratorium on new datacenter development." },
+  "Travis": { status: "blocked", reason: "Residential buffer zone — too close to dense residential development." },
+  "Hays": { status: "blocked", reason: "Edwards Aquifer recharge zone — protected from new impervious development." },
+  "Bexar": { status: "paused", reason: "San Antonio has paused new datacenter applications." },
+  "Ector": { status: "notable", reason: "Dense transmission buildout serving Permian Basin oil & gas load." },
+  "Harris": { status: "notable", reason: "Ship-channel industrial corridor — heavy existing interconnection capacity." },
+  "Collin": { status: "notable", reason: "North Texas transmission-dense corridor." },
+  "Nueces": { status: "notable", reason: "South Texas energy corridor, strong wind generation nearby." }
 };
 
-var GOOD_EXAMPLE = "4,2";
-var BAD_EXAMPLE = "3,4";
+var GOOD_EXAMPLE_COUNTY = "Ector";
+var BAD_EXAMPLE_COUNTY = "Hood";
 
-// ---- cooling and interconnection trade-offs ----
+// ---- cooling trade-offs (relative units; see gateWater for the real WUE math) ----
 var COOLING = {
-  air:         { headroom: 16, water: 2,  approval: 5 },
-  evaporative: { headroom: 9,  water: 18, approval: 8 },
-  liquid:      { headroom: 7,  water: 4,  approval: 4 }
+  air:         { headroom: 16, waterMultiplier: 0.11, approval: 5 },
+  evaporative: { headroom: 9,  waterMultiplier: 1.0,  approval: 8 },
+  liquid:      { headroom: 7,  waterMultiplier: 0.22, approval: 4 }
+};
+
+// Real published coefficients from the project research doc — used for
+// the Water and Land gates' informational estimates.
+var COEFFICIENTS = {
+  GAL_PER_DAY_PER_MW_AVG: 11000,   // 100MW facility ~= 1.1M gal/day at US-average WUE (1.8 L/kWh)
+  EVAP_CONSUMED_FRACTION: 0.80,     // evaporative cooling: ~80% of withdrawal is consumed, not returned
+  LAND_COST_PER_ACRE: 244000,       // 2024 average
+  AVG_CAMPUS_ACRES: 244
 };
 
 var baseline = { headroom: 78, water: 64, approval: 72 };
@@ -62,11 +66,14 @@ var state = {
   loadMW: 150,
   interconnect: "grid-tied",
   cooling: "air",
-  selected: null,   // "row,col"
-  placed: {}        // "row,col": true
+  selected: null,   // {lat, lng}
+  placed: []        // [{lat, lng}]
 };
 
-var tiles = {}; // "row,col" -> DOM element
+var map, countyLayer, plantLayerGroup, selectedMarker, placedLayerGroup;
+var countiesData = null;
+var plantsData = null;
+var countySites = []; // [{feature, centroid:{lat,lng}}] built once counties load
 
 function tierFor(score) {
   if (score >= 75) return { label: "Buildable now", cls: "good" };
@@ -75,42 +82,125 @@ function tierFor(score) {
   return { label: "Try a nearby site", cls: "bad" };
 }
 
-function substationTiles() {
-  return Object.keys(NAMED).filter(function (k) { return NAMED[k].status === "substation"; });
+// ---- geometry helpers (no turf.js dependency — plain ray casting) ----
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  var R = 3958.8;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLng = (lng2 - lng1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// core scoring: capacity fit (distance to nearest substation) discounted by
-// local application pauses and the statewide grid-tied interconnection order.
-function evaluateTile(key) {
-  var named = NAMED[key];
-
-  if (named && named.status === "blocked") {
-    return { blocked: true, name: named.name, reason: named.reason };
+function pointInRing(pt, ring) {
+  var x = pt[0], y = pt[1], inside = false;
+  for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    var xi = ring[i][0], yi = ring[i][1];
+    var xj = ring[j][0], yj = ring[j][1];
+    var intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
   }
+  return inside;
+}
 
-  var name = named ? named.name : "Unnamed county — tile " + key;
-  var score;
-
-  if (named && named.status === "substation") {
-    score = 92;
-  } else {
-    var parts = key.split(",").map(Number);
-    var row = parts[0], col = parts[1];
-    var subs = substationTiles();
-    var minDist = Math.min.apply(null, subs.map(function (sKey) {
-      var sParts = sKey.split(",").map(Number);
-      return Math.hypot(row - sParts[0], col - sParts[1]);
-    }));
-    score = Math.max(8, Math.min(90, Math.round(88 - minDist * 9)));
+function pointInPolygonCoords(pt, rings) {
+  if (!pointInRing(pt, rings[0])) return false;
+  for (var i = 1; i < rings.length; i++) {
+    if (pointInRing(pt, rings[i])) return false; // inside a hole
   }
+  return true;
+}
+
+function pointInGeometry(pt, geometry) {
+  if (!geometry) return false;
+  if (geometry.type === "Polygon") return pointInPolygonCoords(pt, geometry.coordinates);
+  if (geometry.type === "MultiPolygon") {
+    for (var i = 0; i < geometry.coordinates.length; i++) {
+      if (pointInPolygonCoords(pt, geometry.coordinates[i])) return true;
+    }
+  }
+  return false;
+}
+
+function ringCentroid(ring) {
+  var sx = 0, sy = 0;
+  for (var i = 0; i < ring.length; i++) { sx += ring[i][0]; sy += ring[i][1]; }
+  return [sx / ring.length, sy / ring.length];
+}
+
+function geometryCentroid(geometry) {
+  var ring;
+  if (geometry.type === "Polygon") ring = geometry.coordinates[0];
+  else ring = geometry.coordinates[0][0]; // first ring of first part for MultiPolygon
+  var c = ringCentroid(ring);
+  return { lat: c[1], lng: c[0] };
+}
+
+function findCounty(lat, lng) {
+  var pt = [lng, lat];
+  for (var i = 0; i < countiesData.features.length; i++) {
+    var f = countiesData.features[i];
+    if (pointInGeometry(pt, f.geometry)) return f;
+  }
+  return null;
+}
+
+// ---- gate 1: Power (real EIA-860 proxy) ----
+function nearbyPlants(lat, lng, radiusMiles) {
+  var out = [];
+  var feats = plantsData.features;
+  for (var i = 0; i < feats.length; i++) {
+    var c = feats[i].geometry.coordinates; // [lng, lat]
+    var d = haversineMiles(lat, lng, c[1], c[0]);
+    if (d <= radiusMiles) out.push({ feature: feats[i], distanceMiles: d });
+  }
+  return out;
+}
+
+function gatePower(lat, lng) {
+  var nearby100 = nearbyPlants(lat, lng, 100);
+  if (nearby100.length === 0) {
+    return {
+      pass: false,
+      blocked: true,
+      reason: "No EIA-860 generation facility within 100 miles — proxy suggests very weak transmission access here.",
+      notes: []
+    };
+  }
+  nearby100.sort(function (a, b) { return a.distanceMiles - b.distanceMiles; });
+  var nearest = nearby100[0];
+
+  var within25 = nearby100.filter(function (p) { return p.distanceMiles <= 25; });
+  var totalNearbyMW = within25.reduce(function (s, p) { return s + (p.feature.properties.nameplate_mw || 0); }, 0);
+
+  var highVoltage = nearby100.filter(function (p) { return (p.feature.properties.max_grid_voltage_kv || 0) >= 230; });
+  var nearestHighVoltage = highVoltage.length ? highVoltage[0] : null;
+
+  var base = 100 - Math.min(90, nearest.distanceMiles * 1.2);
+  var capacityBoost = Math.min(20, totalNearbyMW / 500);
+  var score = Math.max(5, Math.min(95, Math.round(base + capacityBoost)));
 
   var notes = [];
-
-  if (named && named.status === "paused") {
-    score = Math.min(score, 55);
-    notes.push(named.reason + " Score capped pending local reopening.");
+  notes.push(
+    "Estimate: nearest EIA-860 plant is " + nearest.feature.properties.name + " (" +
+    nearest.feature.properties.nameplate_mw + " MW), " + nearest.distanceMiles.toFixed(1) +
+    " mi away. This is a proxy for grid density, not real substation headroom (CEII-restricted, not public)."
+  );
+  if (nearestHighVoltage) {
+    notes.push(
+      nearestHighVoltage.feature.properties.max_grid_voltage_kv + "kV+ interconnection nearby: " +
+      nearestHighVoltage.feature.properties.name + ", " + nearestHighVoltage.distanceMiles.toFixed(1) + " mi."
+    );
+  } else {
+    notes.push("No 230kV+ interconnected plant found within 100 miles — likely a distribution-only area.");
   }
+  notes.push(Math.round(totalNearbyMW).toLocaleString() + " MW of nameplate generation capacity within 25 miles (proxy for local grid strength).");
 
+  if (state.loadMW >= 75) {
+    notes.push("SB6 (2025): loads ≥75MW are subject to statewide interconnection/curtailment rules.");
+  }
   if (state.interconnect === "grid-tied" && score >= 75) {
     score -= 15;
     notes.push("Gov. Abbott's Aug 2026 order pauses new grid-tied interconnections pending audit — this cap lifts once the audit clears, or switch to self-generated.");
@@ -118,77 +208,183 @@ function evaluateTile(key) {
   if (state.interconnect === "self-generated") {
     notes.push("Self-generated facilities are exempt from the Aug 2026 grid-tied interconnection pause.");
   }
-  if (state.loadMW >= 75) {
-    notes.push("SB6 (2025): loads \u226575MW are subject to statewide interconnection/curtailment rules.");
-  }
 
-  var tier = tierFor(score);
-  return { blocked: false, name: name, score: score, tier: tier, notes: notes };
+  return { pass: true, blocked: false, score: score, notes: notes };
 }
 
-function suggestNearby(key) {
-  var parts = key.split(",").map(Number);
-  var row = parts[0], col = parts[1];
+// ---- gate 2: Fiber (not wired to real data yet) ----
+function gateFiber() {
+  return {
+    pass: true,
+    blocked: false,
+    notes: ["Fiber/long-haul route data (FCC BDC, PeeringDB) is not wired in yet — this gate is a structural placeholder and doesn't affect the score."]
+  };
+}
+
+// ---- gate 3: Regulation (real, hand-curated from the research brief) ----
+function gateRegulatory(county) {
+  if (!county) {
+    return { pass: true, blocked: false, notes: ["Outside a recognized Texas county boundary."] };
+  }
+  var name = county.properties.name;
+  var reg = NAMED_REGULATORY[name];
+  if (!reg) {
+    return { pass: true, blocked: false, notes: [], countyName: name };
+  }
+  if (reg.status === "blocked") {
+    return { pass: false, blocked: true, reason: reg.reason, notes: [], countyName: name };
+  }
+  if (reg.status === "paused") {
+    return { pass: true, blocked: false, capScore: 55, notes: [reg.reason + " Score capped pending local reopening."], countyName: name };
+  }
+  // "notable" — informational context from the brief, not a constraint
+  return { pass: true, blocked: false, notes: [reg.reason], countyName: name };
+}
+
+// ---- gate 4: Water (real published coefficients, no local supply-boundary data yet) ----
+function gateWater() {
+  var cooling = COOLING[state.cooling];
+  var galPerDay = Math.round(state.loadMW * COEFFICIENTS.GAL_PER_DAY_PER_MW_AVG * cooling.waterMultiplier);
+  var notes = [
+    "Estimated withdrawal at " + state.loadMW + "MW with " + state.cooling + " cooling: ~" +
+    galPerDay.toLocaleString() + " gal/day (US-average WUE coefficient, 1.8 L/kWh, Shehabi/LBNL 2016).",
+    "Local water-system capacity (EPA CWS service area boundaries) isn't wired in yet — this is a demand estimate only, not checked against real supply."
+  ];
+  if (state.cooling === "evaporative") {
+    notes.push("Evaporative cooling: ~" + Math.round(COEFFICIENTS.EVAP_CONSUMED_FRACTION * 100) + "% of withdrawal is consumed rather than returned to the source.");
+  }
+  return { pass: true, blocked: false, notes: notes, galPerDay: galPerDay };
+}
+
+// ---- gate 5: Land (real published coefficients, no parcel/zoning data yet) ----
+function gateLand() {
+  var estCost = COEFFICIENTS.LAND_COST_PER_ACRE * COEFFICIENTS.AVG_CAMPUS_ACRES;
+  return {
+    pass: true,
+    blocked: false,
+    notes: [
+      "Reference baseline: a " + COEFFICIENTS.AVG_CAMPUS_ACRES + "-acre campus at $" +
+      COEFFICIENTS.LAND_COST_PER_ACRE.toLocaleString() + "/acre (2024 avg) ≈ $" +
+      (estCost / 1e6).toFixed(0) + "M land cost — not adjusted for this specific site; parcel/zoning data isn't wired in yet."
+    ]
+  };
+}
+
+// ---- sequential gate-then-explain evaluation ----
+// Power -> Fiber -> Regulation -> Water -> Land. A site failing an earlier
+// gate is blocked regardless of how later gates would score — see the
+// architecture note at the top of this file.
+function evaluateSite(lat, lng) {
+  var county = findCounty(lat, lng);
+  var countyName = county ? county.properties.name : null;
+  var name = countyName ? (countyName + " County") : ("Unnamed site (" + lat.toFixed(2) + ", " + lng.toFixed(2) + ")");
+
+  var gates = [
+    { key: "power", label: "Power", result: gatePower(lat, lng) },
+  ];
+  gates.push({ key: "fiber", label: "Fiber", result: gateFiber() });
+  var regResult = gateRegulatory(county);
+  gates.push({ key: "regulatory", label: "Regulation", result: regResult });
+  if (regResult.countyName) name = regResult.countyName + " County";
+
+  for (var i = 0; i < gates.length; i++) {
+    if (gates[i].result.blocked) {
+      return { blocked: true, name: name, blockingGate: gates[i].label, reason: gates[i].result.reason, gates: gates };
+    }
+  }
+
+  gates.push({ key: "water", label: "Water", result: gateWater() });
+  gates.push({ key: "land", label: "Land", result: gateLand() });
+
+  var score = gates[0].result.score;
+  if (typeof regResult.capScore === "number") score = Math.min(score, regResult.capScore);
+  var tier = tierFor(score);
+
+  return { blocked: false, name: name, score: score, tier: tier, gates: gates };
+}
+
+function suggestNearby(lat, lng) {
   var best = null, bestScore = -1, bestDist = Infinity;
-  Object.keys(tiles).forEach(function (k) {
-    if (k === key) return;
-    var ev = evaluateTile(k);
+  countySites.forEach(function (site) {
+    var ev = evaluateSite(site.centroid.lat, site.centroid.lng);
     if (ev.blocked) return;
-    var kParts = k.split(",").map(Number);
-    var dist = Math.hypot(row - kParts[0], col - kParts[1]);
+    var dist = haversineMiles(lat, lng, site.centroid.lat, site.centroid.lng);
     if (ev.score > bestScore || (ev.score === bestScore && dist < bestDist)) {
-      best = k; bestScore = ev.score; bestDist = dist;
+      best = ev; bestScore = ev.score; bestDist = dist;
     }
   });
   return best;
 }
 
-// ---- grid rendering ----
-function buildGrid() {
-  var grid = document.getElementById("tileGrid");
-  for (var row = 0; row < ROWS; row++) {
-    for (var col = 0; col < COLS; col++) {
-      var el = document.createElement("button");
-      var inRow = col >= ROW_MASK[row][0] && col <= ROW_MASK[row][1];
-      if (!inRow) {
-        el.className = "tile empty";
-        el.tabIndex = -1;
-        grid.appendChild(el);
-        continue;
-      }
-      var key = row + "," + col;
-      el.className = "tile";
-      el.dataset.key = key;
-      var named = NAMED[key];
-      if (named && named.status === "substation") el.classList.add("substation");
-      el.setAttribute("aria-label", named ? named.name : "tile " + key);
-      el.addEventListener("click", function (e) { onTileClick(e.currentTarget.dataset.key); });
-      grid.appendChild(el);
-      tiles[key] = el;
+// ---- map rendering ----
+function countyFillClass(feature) {
+  var name = feature.properties.name;
+  var reg = NAMED_REGULATORY[name];
+  if (reg && reg.status === "blocked") return "bad";
+  if (reg && reg.status === "paused") return "paused";
+  var c = geometryCentroid(feature.geometry);
+  var pw = gatePower(c.lat, c.lng);
+  if (!pw.pass) return "bad";
+  return tierFor(pw.score).cls;
+}
+
+var FILL_COLORS = { good: "#4fbf8b", caution: "#e8a33d", major: "#d9793d", bad: "#e0614a", paused: "#8a7fd0" };
+
+function styleCounty(feature) {
+  var cls = countyFillClass(feature);
+  return {
+    fillColor: FILL_COLORS[cls] || "#2a3947",
+    fillOpacity: 0.35,
+    color: "#2a3947",
+    weight: 1
+  };
+}
+
+function initMap() {
+  map = L.map("map", { scrollWheelZoom: true }).setView([31.4, -99.3], 6);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+    maxZoom: 12
+  }).addTo(map);
+
+  countyLayer = L.geoJSON(countiesData, {
+    style: styleCounty,
+    onEachFeature: function (feature, layer) {
+      layer.on("click", function (e) {
+        L.DomEvent.stopPropagation(e);
+        onMapClick(e.latlng.lat, e.latlng.lng);
+      });
+      layer.bindTooltip(feature.properties.name + " County", { sticky: true });
     }
-  }
+  }).addTo(map);
+
+  plantLayerGroup = L.layerGroup().addTo(map);
+  plantsData.features.forEach(function (f) {
+    var mw = f.properties.nameplate_mw || 0;
+    var r = Math.max(2, Math.min(14, Math.sqrt(mw) * 0.6));
+    var marker = L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {
+      radius: r,
+      color: "#5fc9d9",
+      weight: 1,
+      fillOpacity: 0.35,
+      opacity: 0.7
+    });
+    marker.bindTooltip(f.properties.name + " — " + mw + " MW (" + (f.properties.technologies || []).join(", ") + ")");
+    marker.addTo(plantLayerGroup);
+  });
+
+  placedLayerGroup = L.layerGroup().addTo(map);
+
+  map.on("click", function (e) { onMapClick(e.latlng.lat, e.latlng.lng); });
+
+  document.getElementById("togglePlants").addEventListener("change", function (e) {
+    if (e.target.checked) map.addLayer(plantLayerGroup);
+    else map.removeLayer(plantLayerGroup);
+  });
 }
 
-function paintTile(key) {
-  var el = tiles[key];
-  if (!el) return;
-  el.classList.remove("good", "caution", "major", "bad", "paused", "selected");
-
-  var named = NAMED[key];
-  if (named && named.status === "blocked") {
-    el.classList.add("bad");
-  } else if (named && named.status === "paused") {
-    el.classList.add("paused");
-  } else {
-    var ev = evaluateTile(key);
-    if (!ev.blocked) el.classList.add(ev.tier.cls);
-  }
-  if (state.selected === key) el.classList.add("selected");
-  el.classList.toggle("placed", !!state.placed[key]);
-}
-
-function paintAll() {
-  Object.keys(tiles).forEach(paintTile);
+function repaintCounties() {
+  if (countyLayer) countyLayer.setStyle(styleCounty);
 }
 
 // ---- side panel ----
@@ -200,7 +396,7 @@ function renderTilePanel() {
     detail.style.display = "none";
     return;
   }
-  var ev = evaluateTile(state.selected);
+  var ev = evaluateSite(state.selected.lat, state.selected.lng);
   empty.style.display = "none";
   detail.style.display = "block";
 
@@ -208,46 +404,57 @@ function renderTilePanel() {
   var scoreEl = document.getElementById("tileScore");
   var tierEl = document.getElementById("tileTier");
   var notesEl = document.getElementById("tileNotes");
+  var gateListEl = document.getElementById("gateList");
   notesEl.innerHTML = "";
+  gateListEl.innerHTML = "";
   var placeBtn = document.getElementById("placeBtn");
+
+  ev.gates.forEach(function (g) {
+    var row = document.createElement("div");
+    row.className = "gate-row" + (g.result.blocked ? " gate-blocked" : "");
+    row.textContent = g.label + (g.result.blocked ? " — blocked" : (g.result.score !== undefined ? " — " + g.result.score : " — ok"));
+    gateListEl.appendChild(row);
+  });
 
   if (ev.blocked) {
     scoreEl.textContent = "—";
     scoreEl.style.color = "var(--bad)";
-    tierEl.textContent = "Blocked";
+    tierEl.textContent = "Blocked at " + ev.blockingGate + " gate";
     tierEl.style.color = "var(--bad)";
     var li = document.createElement("li");
     li.textContent = ev.reason;
     notesEl.appendChild(li);
 
-    var nearKey = suggestNearby(state.selected);
-    if (nearKey) {
-      var nearEv = evaluateTile(nearKey);
+    var nearEv = suggestNearby(state.selected.lat, state.selected.lng);
+    if (nearEv) {
       var li2 = document.createElement("li");
       li2.textContent = "Nearest viable alternative: " + nearEv.name + " (" + nearEv.tier.label + ").";
       notesEl.appendChild(li2);
     }
     placeBtn.disabled = true;
-    placeBtn.textContent = "Can't place — protected zone";
+    placeBtn.textContent = "Can't place — blocked";
   } else {
     scoreEl.textContent = ev.score;
     scoreEl.style.color = "var(--" + ev.tier.cls + ")";
     tierEl.textContent = ev.tier.label;
     tierEl.style.color = "var(--" + ev.tier.cls + ")";
-    ev.notes.forEach(function (n) {
-      var l = document.createElement("li");
-      l.textContent = n;
-      notesEl.appendChild(l);
+    ev.gates.forEach(function (g) {
+      g.result.notes.forEach(function (n) {
+        var l = document.createElement("li");
+        l.textContent = n;
+        notesEl.appendChild(l);
+      });
     });
-    var alreadyPlaced = !!state.placed[state.selected];
+    var alreadyPlaced = state.placed.some(function (p) { return p.lat === state.selected.lat && p.lng === state.selected.lng; });
     placeBtn.disabled = alreadyPlaced;
     placeBtn.textContent = alreadyPlaced ? "Placed" : "Place datacenter here";
   }
 }
 
-function onTileClick(key) {
-  state.selected = key;
-  paintAll();
+function onMapClick(lat, lng) {
+  state.selected = { lat: lat, lng: lng };
+  if (selectedMarker) map.removeLayer(selectedMarker);
+  selectedMarker = L.circleMarker([lat, lng], { radius: 8, color: "#e7edf2", weight: 2, fillOpacity: 0 }).addTo(map);
   renderTilePanel();
 }
 
@@ -263,31 +470,34 @@ function renderMeters() {
 
 function placeDatacenter() {
   if (!state.selected) return;
-  var ev = evaluateTile(state.selected);
+  var ev = evaluateSite(state.selected.lat, state.selected.lng);
   if (ev.blocked) return;
 
   var cooling = COOLING[state.cooling];
   var loadFactor = state.loadMW / 150;
   var headroomDrain = cooling.headroom * loadFactor + (state.interconnect === "grid-tied" ? 6 : 0);
-  var waterDrain = cooling.water * loadFactor;
+  var waterGate = ev.gates.filter(function (g) { return g.key === "water"; })[0];
+  var waterDrain = waterGate ? Math.min(30, waterGate.result.galPerDay / 200000) : 0;
   var approvalDrain = cooling.approval + (ev.tier.cls === "paused" ? 6 : 0) - (state.interconnect === "self-generated" ? 3 : 0);
 
   meters.headroom = Math.max(0, Math.round(meters.headroom - headroomDrain));
   meters.water = Math.max(0, Math.round(meters.water - waterDrain));
   meters.approval = Math.max(0, Math.round(meters.approval - approvalDrain));
 
-  state.placed[state.selected] = true;
+  state.placed.push(state.selected);
+  L.circleMarker([state.selected.lat, state.selected.lng], { radius: 6, color: "#e7edf2", weight: 2, fillColor: "#e7edf2", fillOpacity: 0.9 }).addTo(placedLayerGroup);
+
   renderMeters();
-  paintAll();
   renderTilePanel();
 }
 
 function resetSimulation() {
   state.selected = null;
-  state.placed = {};
+  state.placed = [];
   meters = Object.assign({}, baseline);
+  if (selectedMarker) { map.removeLayer(selectedMarker); selectedMarker = null; }
+  if (placedLayerGroup) placedLayerGroup.clearLayers();
   renderMeters();
-  paintAll();
   renderTilePanel();
 }
 
@@ -297,7 +507,7 @@ function wireControls() {
   loadSlider.addEventListener("input", function () {
     state.loadMW = +loadSlider.value;
     document.getElementById("loadMWVal").textContent = state.loadMW;
-    paintAll();
+    repaintCounties();
     renderTilePanel();
   });
 
@@ -306,7 +516,7 @@ function wireControls() {
       document.querySelectorAll("#interconnectToggle .toggle-opt").forEach(function (b) { b.classList.remove("selected"); });
       btn.classList.add("selected");
       state.interconnect = btn.dataset.value;
-      paintAll();
+      repaintCounties();
       renderTilePanel();
     });
   });
@@ -316,6 +526,7 @@ function wireControls() {
       document.querySelectorAll("#coolingToggle .toggle-opt").forEach(function (b) { b.classList.remove("selected"); });
       btn.classList.add("selected");
       state.cooling = btn.dataset.value;
+      renderTilePanel();
     });
   });
 
@@ -324,17 +535,37 @@ function wireControls() {
 
   document.getElementById("loadBadBtn").addEventListener("click", function () {
     resetSimulation();
-    onTileClick(BAD_EXAMPLE);
+    var site = countySites.filter(function (s) { return s.feature.properties.name === BAD_EXAMPLE_COUNTY; })[0];
+    if (site) { map.setView([site.centroid.lat, site.centroid.lng], 8); onMapClick(site.centroid.lat, site.centroid.lng); }
   });
   document.getElementById("loadGoodBtn").addEventListener("click", function () {
     resetSimulation();
-    onTileClick(GOOD_EXAMPLE);
+    var site = countySites.filter(function (s) { return s.feature.properties.name === GOOD_EXAMPLE_COUNTY; })[0];
+    if (site) { map.setView([site.centroid.lat, site.centroid.lng], 8); onMapClick(site.centroid.lat, site.centroid.lng); }
   });
 }
 
 // ---- init ----
-buildGrid();
-wireControls();
-paintAll();
-renderMeters();
-renderTilePanel();
+function setStatus(msg) {
+  var el = document.getElementById("mapStatus");
+  if (el) el.textContent = msg;
+}
+
+Promise.all([
+  fetch("data/counties_tx.geojson").then(function (r) { return r.json(); }),
+  fetch("data/power_plants_tx.geojson").then(function (r) { return r.json(); })
+]).then(function (results) {
+  countiesData = results[0];
+  plantsData = results[1];
+  countySites = countiesData.features.map(function (f) {
+    return { feature: f, centroid: geometryCentroid(f.geometry) };
+  });
+  initMap();
+  wireControls();
+  renderMeters();
+  renderTilePanel();
+  setStatus(countiesData.features.length + " counties, " + plantsData.features.length + " power plants loaded (real data — see README).");
+}).catch(function (err) {
+  setStatus("Failed to load data/*.geojson — serve this over HTTP (python3 -m http.server), not file://. " + err);
+  console.error(err);
+});

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Texas Datacenter Siting Advisor — Demo</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -23,18 +24,20 @@
     <div class="layout">
       <div class="map-col">
         <div class="map-card">
-          <div class="grid-wrap">
-            <div class="tile-grid" id="tileGrid"></div>
+          <div class="map-toolbar">
+            <label class="check"><input type="checkbox" id="togglePlants" checked> Show power plants (EIA-860)</label>
+            <span id="mapStatus" class="map-status">Loading real county and power-plant data&hellip;</span>
           </div>
+          <div id="map"></div>
           <div class="legend">
             <span class="legend-item"><span class="dot dot-good"></span>Buildable now</span>
             <span class="legend-item"><span class="dot dot-caution"></span>Minor upgrade</span>
             <span class="legend-item"><span class="dot dot-major"></span>Major upgrade</span>
             <span class="legend-item"><span class="dot dot-bad"></span>Blocked / try nearby</span>
             <span class="legend-item"><span class="dot dot-paused"></span>Local pause in effect</span>
-            <span class="legend-item"><span class="ring"></span>Substation-adjacent</span>
+            <span class="legend-item"><span class="ring"></span>Power plant (size = nameplate MW)</span>
           </div>
-          <p class="map-note">Schematic county grid, not geographically precise — a stand-in for the real HIFLD / TIGER / Queued Up layers. See README for how to wire those in.</p>
+          <p class="map-note">County boundaries: US Census cartographic boundary files (2023). Power plants: EIA-860 (2025). Click anywhere in Texas to evaluate a site — not just county centroids. See README for what's real data vs. a documented estimate.</p>
         </div>
       </div>
 
@@ -65,13 +68,14 @@
 
         <div class="panel" id="tilePanel">
           <div class="panel-title">Selected site</div>
-          <div id="tileEmpty" class="tile-empty">Click a tile on the map to evaluate it.</div>
+          <div id="tileEmpty" class="tile-empty">Click anywhere on the map to evaluate a site.</div>
           <div id="tileDetail" class="tile-detail" style="display:none;">
             <div class="tile-name" id="tileName"></div>
             <div class="tile-score-row">
               <span class="tile-score" id="tileScore"></span>
               <span class="tile-tier" id="tileTier"></span>
             </div>
+            <div class="gate-list" id="gateList"></div>
             <ul class="tile-notes" id="tileNotes"></ul>
             <button class="btn btn-primary" id="placeBtn">Place datacenter here</button>
           </div>
@@ -96,6 +100,7 @@
     </div>
   </div>
 
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
