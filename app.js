@@ -410,8 +410,18 @@ function styleCounty(feature) {
   };
 }
 
+// Continental US, with a little padding so the coastlines aren't flush
+// against the edge of the map. Keeps panning/zooming from wandering off
+// into the rest of the world — this tool only has data for Texas anyway.
+var US_BOUNDS = L.latLngBounds([22.5, -130.0], [50.5, -63.0]);
+
 function initMap() {
-  map = L.map("map", { scrollWheelZoom: true }).setView([31.4, -99.3], 6);
+  map = L.map("map", {
+    scrollWheelZoom: true,
+    maxBounds: US_BOUNDS,
+    maxBoundsViscosity: 1.0,
+    minZoom: 5
+  }).setView([31.4, -99.3], 6);
   // Plain OpenStreetMap raster tiles — no API key, ever, unlike CARTO's
   // dark/light basemaps which now require an account + key for anything
   // beyond very light use. Dark look comes from a CSS filter on the tile
